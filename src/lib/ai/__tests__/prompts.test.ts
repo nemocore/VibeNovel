@@ -1,0 +1,351 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildChapterSummaryMessages,
+  buildExecutorMessages,
+  buildPlannerMessages,
+  buildPremiseMessages,
+  splitForSummary,
+} from "@/lib/ai/prompts";
+import type { ChatMessage, Outline } from "@/lib/schemas";
+import { createDefaultPreset } from "@/lib/presets/defaults";
+
+const outline: Outline = {
+  version: 1,
+  id: "novel-1",
+  title: "The Cartographer's Debt",
+  premise: "A cartographer returns to a house that remembers her.",
+  status: "active",
+  archived: false,
+  characters: [{ name: "Mara", role: "protagonist", description: "A cartographer." }],
+  chapters: [
+    {
+      number: 1,
+      title: "The Gate",
+      summary: "Mara arrives and finds a map with a warm coastline.",
+      status: "summarized",
+      wordCount: 1200,
+      summaryStale: false,
+      kind: "chapter",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    },
+    {
+      number: 2,
+      title: "The Wall",
+      summary: "",
+      status: "planned",
+      wordCount: 0,
+      summaryStale: false,
+      kind: "chapter",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    },
+  ],
+  currentChapter: 2,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-02T00:00:00.000Z",
+};
+
+const roles = createDefaultPreset().roles;
+
+const plan: ChatMessage[] = [
+  {
+    id: "u1",
+    role: "user",
+    content: "Open with her counting the bricks.",
+    createdAt: "2026-01-02T00:00:00.000Z",
+  },
+  {
+    id: "a1",
+    role: "assistant",
+    content: "Beat 1: arrival. Beat 2: the wall. Beat 3: the map.",
+    createdAt: "2026-01-02T00:01:00.000Z",
+  },
+];
+
+describe("planner prompt", () => {
+  it("keeps the system message clean and injects the vault into a user message", () => {
+    const messages = buildPlannerMessages(
+      outline,
+      2,
+      plan,
+      "What next?",
+      roles.planner.systemPrompt,
+    );
+    expect(messages[0]).toEqual({
+      role: "system",
+      content: roles.planner.systemPrompt.trim(),
+    });
+    const context = messages[1].content;
+    expect(context).toContain("The Cartographer's Debt");
+    expect(context).toContain("A cartographer returns");
+    expect(context).toContain("Mara");
+    expect(context).toContain("Mara arrives and finds a map");
+    expect(context).toContain("[CURRENT CHAPTER]");
+    expect(messages[0].content).not.toContain("The Cartographer's Debt");
+  });
+
+  it("carries the conversation and the new message", () => {
+    const messages = buildPlannerMessages(
+      outline,
+      2,
+      plan,
+      "What next?",
+      roles.planner.systemPrompt,
+    );
+    expect(messages.some((message) => message.content.includes("Beat 1"))).toBe(true);
+    expect(messages.at(-1)?.content).toContain("What next?");
+    expect(messages.at(-1)?.content).toContain("Plan this chapter");
+  });
+
+  it("places the context anchor before the new user message and the prefill at the bottom", () => {
+    const messages = buildPlannerMessages(
+      outline,
+      2,
+      plan,
+      "What next?",
+      roles.planner.systemPrompt,
+      {
+        contextAnchor: "SYSTEM INJECTION",
+        assistantPrefill: "LAST MESSAGE INJECTION",
+      },
+    );
+    expect(messages[0]).toEqual({
+      role: "system",
+      content: roles.planner.systemPrompt.trim(),
+    });
+    expect(messages.at(-3)).toEqual({
+      role: "system",
+      content: "SYSTEM INJECTION",
+    });
+    expect(messages.at(-2)?.role).toBe("user");
+    expect(messages.at(-2)?.content).toContain("What next?");
+    expect(messages.at(-1)).toEqual({
+      role: "assistant",
+      content: "LAST MESSAGE INJECTION",
+    });
+  });
+
+  it("supports a user-role context anchor and omits empty injections", () => {
+    const messages = buildPlannerMessages(
+      outline,
+      2,
+      plan,
+      "What next?",
+      roles.planner.systemPrompt,
+      {
+        contextAnchor: "ANCHOR AS USER",
+        contextAnchorRole: "user",
+        assistantPrefill: "   ",
+      },
+    );
+    expect(messages.at(-2)).toEqual({
+      role: "user",
+      content: "ANCHOR AS USER",
+    });
+    expect(messages.at(-1)?.role).toBe("user");
+    expect(messages.at(-1)?.content).toContain("What next?");
+  });
+});
+
+describe("executor prompt", () => {
+  it("keeps the system message clean and puts vault + plan in the user message", () => {
+    const messages = buildExecutorMessages(outline, 2, plan, roles.executor.systemPrompt);
+    expect(messages[0]).toEqual({
+      role: "system",
+      content: roles.executor.systemPrompt.trim(),
+    });
+    const user = messages[1].content;
+    expect(user).toContain("Mara arrives and finds a map");
+    expect(user).toContain("Beat 1");
+    expect(user).toContain("Write Chapter 2 now.");
+    expect(messages[0].content).not.toContain("Mara arrives and finds a map");
+  });
+
+  it("refuses to execute without a plan", () => {
+    expect(() => buildExecutorMessages(outline, 2, [], roles.executor.systemPrompt)).toThrow(
+      "NO_PLAN",
+    );
+  });
+
+  it("uses only the final Planner response, not the chat transcript", () => {
+    const history: ChatMessage[] = [
+      {
+        id: "u1",
+        role: "user",
+        content: "BRAINSTORM NOISE",
+        createdAt: "2026-01-02T00:00:00.000Z",
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "FIRST DRAFT PLAN",
+        createdAt: "2026-01-02T00:01:00.000Z",
+      },
+      {
+        id: "u2",
+        role: "user",
+        content: "MORE NOISE",
+        createdAt: "2026-01-02T00:02:00.000Z",
+      },
+      {
+        id: "a2",
+        role: "assistant",
+        content: "FINAL PLAN",
+        createdAt: "2026-01-02T00:03:00.000Z",
+      },
+    ];
+    const messages = buildExecutorMessages(outline, 2, history, roles.executor.systemPrompt);
+    const user = messages[1].content;
+    expect(user).toContain("FINAL PLAN");
+    expect(user).not.toContain("BRAINSTORM NOISE");
+    expect(user).not.toContain("FIRST DRAFT PLAN");
+    expect(user).not.toContain("MORE NOISE");
+    expect(user).not.toContain("AUTHOR:");
+  });
+
+  it("uses the text-chapter number and ignores illustration pages", () => {
+    const withIllustration: Outline = {
+      ...outline,
+      chapters: [
+        outline.chapters[0],
+        {
+          number: 2,
+          title: "Illustration",
+          summary: "",
+          status: "planned",
+          wordCount: 0,
+          summaryStale: false,
+          kind: "illustration",
+          updatedAt: "2026-01-02T00:00:00.000Z",
+        },
+        {
+          ...outline.chapters[1],
+          number: 3,
+          chapterNumber: 2,
+        },
+      ],
+      currentChapter: 3,
+    };
+    const messages = buildExecutorMessages(
+      withIllustration,
+      3,
+      plan,
+      roles.executor.systemPrompt,
+    );
+    expect(messages[1].content).toContain("Write Chapter 2 now.");
+    expect(messages[1].content).not.toContain("Write Chapter 3 now.");
+  });
+});
+
+describe("chapter summary prompt", () => {
+  it("includes the chapter text in a user message", () => {
+    const messages = buildChapterSummaryMessages(
+      outline,
+      1,
+      "The gate knew her hand.",
+      roles.summarizer.systemPrompt,
+    );
+    expect(messages[0]).toEqual({
+      role: "system",
+      content: roles.summarizer.systemPrompt.trim(),
+    });
+    expect(messages[1].content).toContain("The gate knew her hand.");
+    expect(messages[1].content).toContain("Summarize the chapter");
+    expect(messages[0].content).not.toContain("The gate knew her hand.");
+  });
+});
+
+describe("splitForSummary", () => {
+  it("splits on paragraph boundaries", () => {
+    const paragraph = "x".repeat(300);
+    const chunks = splitForSummary(Array(5).fill(paragraph).join("\n\n"), 700);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.length <= 700)).toBe(true);
+  });
+
+  it("keeps short text intact", () => {
+    expect(splitForSummary("one paragraph", 700)).toEqual(["one paragraph"]);
+  });
+});
+
+describe("custom prompt templates", () => {
+  it("renders placeholders in a custom executor task", () => {
+    const messages = buildExecutorMessages(
+      outline,
+      2,
+      plan,
+      roles.executor.systemPrompt,
+      undefined,
+      { taskPrompt: "CUSTOM CHAPTER {{chapter}}\n\nPLAN:\n{{plan}}" },
+    );
+    expect(messages[1].content).toContain("CUSTOM CHAPTER 2");
+    expect(messages[1].content).toContain("Beat 1");
+    expect(messages[1].content).not.toContain("{{chapter}}");
+  });
+
+  it("renders the chat placeholder in a custom premise task", () => {
+    const messages = buildPremiseMessages(
+      plan,
+      roles.summarizer.systemPrompt,
+      undefined,
+      "BEGIN\n{{chat}}\nEND",
+    );
+    expect(messages[1].content).toBe(
+      "BEGIN\nAUTHOR: Open with her counting the bricks.\n\nPLANNER: Beat 1: arrival. Beat 2: the wall. Beat 3: the map.\nEND",
+    );
+  });
+});
+
+describe("full context", () => {
+  const longDescription =
+    "A long character description with concrete physical details and a clear emotional register. ".repeat(40) +
+    "The final sentence.";
+  const longPremise = "A long premise. ".repeat(2_000);
+  const longSummary = "A long chapter summary. ".repeat(1_000);
+  const longOutline: Outline = {
+    ...outline,
+    premise: longPremise,
+    characters: [{ name: "Mara", role: "protagonist", description: longDescription }],
+    chapters: [
+      { ...outline.chapters[0], summary: longSummary },
+      outline.chapters[1],
+    ],
+  };
+
+  it("keeps full character descriptions and premise in the Planner context", () => {
+    const messages = buildPlannerMessages(
+      longOutline,
+      2,
+      plan,
+      "What next?",
+      roles.planner.systemPrompt,
+    );
+    expect(messages[1].content).toContain(longDescription);
+    expect(messages[1].content).toContain(longPremise.trim());
+    expect(messages[1].content).not.toContain("[truncated]");
+  });
+
+  it("keeps full character descriptions and summaries in the Executor context", () => {
+    const messages = buildExecutorMessages(
+      longOutline,
+      2,
+      plan,
+      roles.executor.systemPrompt,
+    );
+    expect(messages[1].content).toContain(longDescription);
+    expect(messages[1].content).toContain(longSummary.trim());
+    expect(messages[1].content).not.toContain("[truncated]");
+  });
+
+  it("keeps full character descriptions in the Summarizer context", () => {
+    const messages = buildChapterSummaryMessages(
+      longOutline,
+      1,
+      "The gate knew her hand.",
+      roles.summarizer.systemPrompt,
+    );
+    expect(messages[1].content).toContain(longDescription);
+    expect(messages[1].content).not.toContain("[truncated]");
+  });
+});
+
+

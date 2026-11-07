@@ -1,0 +1,289 @@
+import { mkdirSync } from "node:fs";
+import Database from "better-sqlite3";
+import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import * as schema from "@/lib/db/schema";
+import { DB_PATH, DATA_DIR } from "@/lib/storage/paths";
+import { migrateLegacyFiles, migrateLegacyProvider } from "@/lib/db/migrate";
+import { DEFAULT_SURGICAL_PRESETS } from "@/lib/surgical/defaults";
+
+export type AppDb = BetterSQLite3Database<typeof schema>;
+
+const CHAPTER_COLUMNS: Array<[string, string]> = [
+  ["kind", "TEXT NOT NULL DEFAULT 'chapter'"],
+  ["chapter_number", "INTEGER"],
+  ["image_path", "TEXT"],
+  ["image_prompt", "TEXT"],
+  ["image_negative_prompt", "TEXT"],
+  ["image_aspect_ratio", "TEXT"],
+  ["image_provider_id", "TEXT"],
+  ["image_model", "TEXT"],
+  ["image_updated_at", "TEXT"],
+];
+
+const GLOBAL_COLUMNS: Array<[string, string]> = [
+  ["image_prompter_model", "TEXT NOT NULL DEFAULT ''"],
+  ["surgical_model", "TEXT NOT NULL DEFAULT ''"],
+];
+
+const PROVIDER_COLUMNS: Array<[string, string]> = [
+  ["image_models_json", "TEXT NOT NULL DEFAULT '[]'"],
+];
+
+const BOOK_COLUMNS: Array<[string, string]> = [
+  ["is_archived", "INTEGER NOT NULL DEFAULT 0"],
+  ["image_prompter_model", "TEXT"],
+  ["surgical_model", "TEXT"],
+  ["cover_image_path", "TEXT"],
+  ["cover_image_prompt", "TEXT"],
+  ["cover_image_negative_prompt", "TEXT"],
+  ["cover_image_aspect_ratio", "TEXT"],
+  ["cover_image_provider_id", "TEXT"],
+  ["cover_image_model", "TEXT"],
+  ["cover_image_updated_at", "TEXT"],
+];
+
+function migrateColumns(
+  database: Database.Database,
+  table: string,
+  columns: Array<[string, string]>,
+): void {
+  const existing = new Set(
+    (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    ),
+  );
+  for (const [name, definition] of columns) {
+    if (!existing.has(name)) {
+      database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+    }
+  }
+}
+
+function migrateSchema(database: Database.Database): void {
+  migrateColumns(database, "chapters", CHAPTER_COLUMNS);
+  migrateColumns(database, "global_settings", GLOBAL_COLUMNS);
+  migrateColumns(database, "providers", PROVIDER_COLUMNS);
+  migrateColumns(database, "books", BOOK_COLUMNS);
+}
+
+const DDL = `
+CREATE TABLE IF NOT EXISTS global_settings (
+  id INTEGER PRIMARY KEY,
+  base_url TEXT NOT NULL,
+  api_key TEXT NOT NULL DEFAULT '',
+  planner_model TEXT NOT NULL DEFAULT '',
+  executor_model TEXT NOT NULL DEFAULT '',
+  summarizer_model TEXT NOT NULL DEFAULT '',
+  image_prompter_model TEXT NOT NULL DEFAULT '',
+  surgical_model TEXT NOT NULL DEFAULT '',
+  connection_ok INTEGER NOT NULL DEFAULT 0,
+  connection_checked_at TEXT,
+  connection_latency_ms INTEGER,
+  connection_detail TEXT,
+  default_preset_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS providers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  api_key TEXT NOT NULL DEFAULT '',
+  image_models_json TEXT NOT NULL DEFAULT '[]',
+  connection_ok INTEGER NOT NULL DEFAULT 0,
+  connection_checked_at TEXT,
+  connection_latency_ms INTEGER,
+  connection_detail TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS providers_created_idx ON providers (created_at);
+
+CREATE TABLE IF NOT EXISTS presets (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  built_in INTEGER NOT NULL DEFAULT 0,
+  roles_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS prompt_templates (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS surgical_presets (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  icon TEXT NOT NULL DEFAULT '',
+  instruction TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS books (
+  id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE,
+  title TEXT NOT NULL,
+  premise TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  is_draft INTEGER NOT NULL DEFAULT 0,
+  is_archived INTEGER NOT NULL DEFAULT 0,
+  current_chapter INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  preset_id TEXT,
+  preset_name TEXT,
+  planner_model TEXT,
+  executor_model TEXT,
+  summarizer_model TEXT,
+  image_prompter_model TEXT,
+  surgical_model TEXT,
+  roles_json TEXT,
+  config_created_at TEXT,
+  config_updated_at TEXT,
+  cover_image_path TEXT,
+  cover_image_prompt TEXT,
+  cover_image_negative_prompt TEXT,
+  cover_image_aspect_ratio TEXT,
+  cover_image_provider_id TEXT,
+  cover_image_model TEXT,
+  cover_image_updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS books_slug_idx ON books (slug);
+CREATE INDEX IF NOT EXISTS books_draft_idx ON books (is_draft);
+
+CREATE TABLE IF NOT EXISTS chapters (
+  book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  number INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'planned',
+  word_count INTEGER NOT NULL DEFAULT 0,
+  summary_stale INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  summary_updated_at TEXT,
+  kind TEXT NOT NULL DEFAULT 'chapter',
+  chapter_number INTEGER,
+  image_path TEXT,
+  image_prompt TEXT,
+  image_negative_prompt TEXT,
+  image_aspect_ratio TEXT,
+  image_provider_id TEXT,
+  image_model TEXT,
+  image_updated_at TEXT,
+  PRIMARY KEY (book_id, number)
+);
+CREATE INDEX IF NOT EXISTS chapters_book_idx ON chapters (book_id);
+
+CREATE TABLE IF NOT EXISTS characters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS characters_book_idx ON characters (book_id);
+
+CREATE TABLE IF NOT EXISTS chats (
+  book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  scope TEXT NOT NULL,
+  messages_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (book_id, scope)
+);
+CREATE INDEX IF NOT EXISTS chats_book_idx ON chats (book_id);
+
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+`;
+
+function seedSurgicalPresets(database: Database.Database): void {
+  const seeded = database
+    .prepare("SELECT value FROM meta WHERE key = 'surgical_presets_seeded'")
+    .get() as { value: string } | undefined;
+  if (seeded) return;
+
+  const insert = database.prepare(
+    `INSERT OR IGNORE INTO surgical_presets
+      (id, label, icon, instruction, sort_order, active, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const timestamp = new Date().toISOString();
+  const seed = database.transaction(() => {
+    for (const preset of DEFAULT_SURGICAL_PRESETS) {
+      insert.run(
+        preset.id,
+        preset.label,
+        preset.icon,
+        preset.instruction,
+        preset.sortOrder,
+        1,
+        timestamp,
+        timestamp,
+      );
+    }
+    database
+      .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)")
+      .run("surgical_presets_seeded", "1");
+  });
+  seed();
+}
+
+let dbPromise: Promise<AppDb> | null = null;
+let sqlite: Database.Database | null = null;
+
+async function initialize(): Promise<AppDb> {
+  mkdirSync(DATA_DIR, { recursive: true });
+  const database = new Database(DB_PATH);
+  sqlite = database;
+  database.pragma("journal_mode = WAL");
+  database.pragma("foreign_keys = ON");
+  database.pragma("busy_timeout = 5000");
+  database.exec(DDL);
+  migrateSchema(database);
+  seedSurgicalPresets(database);
+
+  const db = drizzle(database, { schema });
+  await migrateLegacyFiles(db);
+  await migrateLegacyProvider(db);
+  return db;
+}
+
+export function getDb(): Promise<AppDb> {
+  if (!dbPromise) {
+    dbPromise = initialize().catch((error) => {
+      dbPromise = null;
+      if (sqlite) {
+        try {
+          sqlite.close();
+        } catch {
+          // already closed
+        }
+        sqlite = null;
+      }
+      throw error;
+    });
+  }
+  return dbPromise;
+}
+
+export function closeDb(): void {
+  if (sqlite) {
+    try {
+      sqlite.close();
+    } catch {
+      // already closed
+    }
+    sqlite = null;
+  }
+  dbPromise = null;
+}
