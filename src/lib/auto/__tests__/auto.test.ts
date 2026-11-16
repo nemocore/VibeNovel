@@ -20,7 +20,13 @@ import { finalPlanText } from "@/lib/auto/plan-brief";
 import { decodePremise, encodePremise } from "@/lib/auto/create";
 import { buildPlanMessages } from "@/lib/auto/plan";
 import { normalizeAutoRunState } from "@/lib/auto/types";
-import { normalizeAutoModelOverrides, resolveAutoModel } from "@/lib/auto/types";
+import {
+  AUTO_SKILLS,
+  nextPhase,
+  normalizeAutoModelOverrides,
+  normalizeDisabledSkills,
+  resolveAutoModel,
+} from "@/lib/auto/types";
 import { joinContinuation } from "@/lib/auto/continuation";
 import type { Outline } from "@/lib/schemas";
 
@@ -452,6 +458,29 @@ describe("auto plan brief", () => {
     expect(finalPlanText([{ role: "assistant", content: long }], "Premise.")).toHaveLength(
       long.trim().length,
     );
+  });
+});
+
+describe("auto skill toggles", () => {
+  it("keeps only optional skills and de-duplicates", () => {
+    expect(normalizeDisabledSkills(["qa", "qa", "prose", "outline", "archivist", "bogus"])).toEqual([
+      "qa",
+      "archivist",
+    ]);
+    expect(normalizeDisabledSkills(null)).toEqual([]);
+    expect(normalizeDisabledSkills("qa")).toEqual([]);
+  });
+
+  it("routes skipped phases to the next enabled step", () => {
+    expect(nextPhase("qa")).toBe("archive");
+    expect(nextPhase("architect")).toBe("characters");
+    expect(nextPhase("characters")).toBe("outline");
+    expect(nextPhase("prose")).toBe("prose");
+  });
+
+  it("marks core skills as non-optional", () => {
+    const optional = AUTO_SKILLS.filter((skill) => skill.optional).map((skill) => skill.key);
+    expect(optional).toEqual(["architect", "characters", "qa", "archivist"]);
   });
 });
 

@@ -7,12 +7,27 @@ import {
   updateAutoRun,
 } from "@/lib/storage/auto-runs";
 import { autoActionSchema } from "@/lib/auto/schemas";
-import { abortAutoRun, startAutoRun } from "@/lib/auto/runner";
+import { AUTO_SKILLS, nextPhase, PHASE_SKILL } from "@/lib/auto/types";
+import { abortAutoRun, skipAutoStep, startAutoRun } from "@/lib/auto/runner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
+
+const PHASE_LABEL: Record<string, string> = {
+  architect: "Story Architect",
+  characters: "Character Weaver",
+  outline: "Arc & Scene Outliner",
+  prose: "Scene Prose Writer",
+  qa: "Continuity & QA Critic",
+  archive: "State Archivist",
+  done: "Complete",
+};
+
+function skillLabel(key: string): string {
+  return AUTO_SKILLS.find((skill) => skill.key === key)?.label ?? key;
+}
 
 export async function POST(request: Request, { params }: Params) {
   try {
@@ -52,6 +67,39 @@ export async function POST(request: Request, { params }: Params) {
         message: "Run stopped by the author.",
       });
       return jsonOk({ run: updated, chapters: await listAutoRunChapters(id) });
+    }
+
+    if (input.action === "skip_step") {
+      if (run.status !== "paused" && run.status !== "failed") {
+        throw new AppError("CONFLICT", "Pause the run before skipping a step.", { status: 409 });
+      }
+      if (!run.state.planLockedAt) {
+        throw new AppError(
+          "CONFLICT",
+          "Approve the plan before skipping pipeline steps.",
+          { status: 409 },
+        );
+      }
+      if (!["architect", "characters", "qa"].includes(run.phase)) {
+        throw new AppError(
+          "CONFLICT",
+          run.phase === "archive"
+            ? "State Archivist completes the chapter. Disable it in Skill prompts instead."
+            : "This step generates the chapter and cannot be skipped.",
+          { status: 409 },
+        );
+      }
+      const skill = PHASE_SKILL[run.phase];
+      const target = nextPhase(run.phase);
+      const skipped = await skipAutoStep(id);
+      await appendAutoEvent(id, {
+        level: "warn",
+        phase: run.phase,
+        chapter: run.currentChapter,
+        message: `${skill ? skillLabel(skill) : "Step"} skipped for chapter ${run.currentChapter}. Continuing at ${PHASE_LABEL[target]}.`,
+      });
+      startAutoRun(id);
+      return jsonOk({ run: skipped, chapters: await listAutoRunChapters(id) });
     }
 
     if (run.status !== "paused" && run.status !== "failed" && run.status !== "stopped") {

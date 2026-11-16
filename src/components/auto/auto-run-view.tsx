@@ -14,6 +14,7 @@ import {
   Play,
   Save,
   SlidersHorizontal,
+  SkipForward,
   Square,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -47,6 +48,7 @@ import type {
   AutoRunChapter,
   AutoRunEvent,
 } from "@/lib/auto/types";
+import { AUTO_SKILLS, PHASE_SKILL } from "@/lib/auto/types";
 
 const PHASE_LABEL: Record<string, string> = {
   architect: "Story Architect",
@@ -123,7 +125,7 @@ export function AutoRunView({
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  async function act(action: "pause" | "resume" | "stop") {
+  async function act(action: "pause" | "resume" | "stop" | "skip_step") {
     setBusy(action);
     setError(null);
     try {
@@ -142,7 +144,13 @@ export function AutoRunView({
       if (payload?.run) setRun(payload.run);
       if (payload?.chapters) setChapters(payload.chapters);
       toast.success(
-        action === "pause" ? "Run paused." : action === "resume" ? "Run resumed." : "Run stopped.",
+        action === "pause"
+          ? "Run paused."
+          : action === "resume"
+            ? "Run resumed."
+            : action === "skip_step"
+              ? "Step skipped."
+              : "Run stopped.",
       );
     } catch {
       setError("Could not reach the app server.");
@@ -234,6 +242,25 @@ export function AutoRunView({
                 >
                   {busy === "resume" ? <Loader2 className="animate-spin" /> : <Play />}
                   Resume
+                </Button>
+              ) : null}
+              {resumable &&
+              planApproved &&
+              ["architect", "characters", "qa"].includes(run.phase) ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void act("skip_step")}
+                  disabled={busy !== null}
+                  className="text-muted-foreground hover:text-[#f2c477]"
+                  title={`Skip ${PHASE_LABEL[run.phase] ?? run.phase} for chapter ${run.currentChapter}`}
+                >
+                  {busy === "skip_step" ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <SkipForward className="size-3.5" />
+                  )}
+                  Skip step
                 </Button>
               ) : null}
               {!planApproved && run.mode === "checkpoint" ? (
@@ -346,6 +373,11 @@ export function AutoRunView({
                   "archive",
                   "done",
                 ];
+                const skillKey = PHASE_SKILL[phase];
+                const optionalSkill = AUTO_SKILLS.find(
+                  (skill) => skill.key === skillKey && skill.optional,
+                );
+                const disabled = Boolean(skillKey && skillsState.disabled.includes(skillKey));
                 const currentIndex = order.indexOf(run.phase);
                 const state =
                   run.phase === "done"
@@ -356,26 +388,73 @@ export function AutoRunView({
                         ? "active"
                         : "pending";
                 return (
-                  <li key={phase} className="bg-[#0d131a] px-3 py-2.5">
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={cn(
-                          "size-1.5 rounded-full",
-                          state === "done"
-                            ? "bg-[#86bd93]"
-                            : state === "active"
-                              ? "animate-pulse-dot bg-[#f2c477]"
-                              : "bg-muted-foreground/40",
-                        )}
-                      />
-                      <span className="font-mono text-[9px] tabular text-muted-foreground">
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
+                  <li
+                    key={phase}
+                    className={cn("bg-[#0d131a] px-3 py-2.5", disabled && "opacity-60")}
+                  >
+                    <div className="flex items-center justify-between gap-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={cn(
+                            "size-1.5 rounded-full",
+                            disabled
+                              ? "bg-muted-foreground/30"
+                              : state === "done"
+                                ? "bg-[#86bd93]"
+                                : state === "active"
+                                  ? "animate-pulse-dot bg-[#f2c477]"
+                                  : "bg-muted-foreground/40",
+                          )}
+                        />
+                        <span className="font-mono text-[9px] tabular text-muted-foreground">
+                          {String(index + 1).padStart(2, "0")}
+                        </span>
+                      </div>
+                      {optionalSkill ? (
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={!disabled}
+                          aria-label={`${PHASE_LABEL[phase]} enabled`}
+                          title={
+                            run.status === "running"
+                              ? "Pause the run to change pipeline steps"
+                              : disabled
+                                ? `Enable ${PHASE_LABEL[phase]}`
+                                : `Disable ${PHASE_LABEL[phase]}`
+                          }
+                          disabled={run.status === "running"}
+                          onClick={() => {
+                            if (!skillKey) return;
+                            const next = skillsState.disabled.includes(skillKey)
+                              ? skillsState.disabled.filter((key) => key !== skillKey)
+                              : [...skillsState.disabled, skillKey];
+                            skillsState.setDisabled(next);
+                            void skillsState.saveDisabled(next);
+                          }}
+                          className={cn(
+                            "rounded-full border px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-[0.1em] transition-colors disabled:cursor-not-allowed",
+                            disabled
+                              ? "border-border bg-secondary text-muted-foreground"
+                              : "border-[#2d4a36] bg-[#14211a] text-[#9cc9a6]",
+                          )}
+                        >
+                          {disabled ? "Off" : "On"}
+                        </button>
+                      ) : (
+                        <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-muted-foreground/50">
+                          Core
+                        </span>
+                      )}
                     </div>
                     <p
                       className={cn(
                         "mt-1 text-[11px] leading-tight",
-                        state === "pending" ? "text-muted-foreground/70" : "text-foreground",
+                        disabled
+                          ? "text-muted-foreground/70 line-through decoration-muted-foreground/40"
+                          : state === "pending"
+                            ? "text-muted-foreground/70"
+                            : "text-foreground",
                       )}
                     >
                       {PHASE_LABEL[phase]}

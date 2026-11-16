@@ -24,10 +24,14 @@ import {
   runProse,
   runQa,
 } from "@/lib/auto/skills";
+import { getAutoSkillPrompts } from "@/lib/storage/auto-skills";
 import {
   AUTO_MAX_REVISIONS,
+  nextPhase,
   type AutoChapterPlan,
   type AutoRun,
+  type AutoSkillKey,
+  type AutoStoryBible,
 } from "@/lib/auto/types";
 
 type ActiveRun = { controller: AbortController };
@@ -80,6 +84,41 @@ function ensureRunReady(run: AutoRun): void {
       status: 500,
     });
   }
+}
+
+async function isSkillDisabled(slug: string, skill: AutoSkillKey): Promise<boolean> {
+  const prompts = await getAutoSkillPrompts(slug);
+  return prompts.disabled.includes(skill);
+}
+
+/**
+ * When the Story Architect is switched off, build a minimal Story Bible from the
+ * locked plan so later skills still have a contract to follow.
+ */
+function fallbackStoryBible(run: AutoRun, premise: string): AutoStoryBible {
+  const brief = run.state.planBrief.trim() || premise.trim();
+  const source = brief || `${run.bookTitle} has no recorded premise yet.`;
+  const firstSentence = source.split(/(?<=[.!?])\s+/)[0] ?? source;
+  return {
+    title: run.bookTitle,
+    logline: firstSentence.slice(0, 300),
+    tone: "Follow the locked plan and the established chapters.",
+    worldRules: ["Stay consistent with the locked plan and every existing chapter."],
+    coreConflict: source.slice(0, 1_000),
+    endingResolution: "Resolve the central conflict the locked plan sets up.",
+    targetChapters: run.targetChapters > 0 ? run.targetChapters : 12,
+    constraints: [],
+  };
+}
+
+function excerptSummary(text: string, fallback: string): string {
+  const clean = text.trim();
+  if (!clean) return fallback;
+  const limit = 1_200;
+  if (clean.length <= limit) return clean;
+  const cut = clean.slice(0, limit);
+  const boundary = cut.lastIndexOf(". ");
+  return boundary > 400 ? cut.slice(0, boundary + 1) : `${cut.trimEnd()}…`;
 }
 
 function errorMessage(error: unknown): string {
@@ -138,6 +177,26 @@ async function saveSceneProgress(input: {
 
 async function stepArchitect(run: AutoRun, signal: AbortSignal): Promise<void> {
   const outline = await getNovel(run.slug);
+
+  if (await isSkillDisabled(run.slug, "architect")) {
+    const storyBible = fallbackStoryBible(run, outline.premise);
+    const target = run.targetChapters > 0 ? run.targetChapters : storyBible.targetChapters;
+    await updateAutoRun(run.id, {
+      storyBible: { ...storyBible, targetChapters: target },
+      targetChapters: target,
+      phase: "characters",
+      startedAt: run.startedAt ?? now(),
+      lastError: null,
+    });
+    await appendAutoEvent(run.id, {
+      level: "warn",
+      phase: "architect",
+      chapter: run.currentChapter,
+      message: "Story Architect skipped (disabled for this run). Using the locked plan as the Story Bible.",
+    });
+    return;
+  }
+
   const { storyBible: generatedBible } = await runArchitect({
     slug: run.slug,
     outline,
@@ -170,6 +229,15 @@ async function stepArchitect(run: AutoRun, signal: AbortSignal): Promise<void> {
 
 async function stepCharacters(run: AutoRun, signal: AbortSignal): Promise<void> {
   ensureRunReady(run);
+  if (await isSkillDisabled(run.slug, "characters")) {
+    await updateAutoRun(run.id, { phase: "outline", lastError: null });
+    await appendAutoEvent(run.id, {
+      level: "warn",
+      phase: "characters",
+      message: "Character Weaver skipped (disabled for this run). Keeping the existing roster.",
+    });
+    return;
+  }
   const outline = await getNovel(run.slug);
   const generated = await runCharacters({
     slug: run.slug,
@@ -337,6 +405,16 @@ async function stepProse(run: AutoRun, signal: AbortSignal): Promise<void> {
 
 async function stepQa(run: AutoRun, signal: AbortSignal): Promise<void> {
   ensureRunReady(run);
+  if (await isSkillDisabled(run.slug, "qa")) {
+    await updateAutoRun(run.id, { phase: "archive", currentScene: 0, lastError: null });
+    await appendAutoEvent(run.id, {
+      level: "warn",
+      phase: "qa",
+      chapter: run.currentChapter,
+      message: "Continuity & QA Critic skipped (disabled for this run).",
+    });
+    return;
+  }
   const plan = nextChapterPlan(run);
   if (!plan) throw new AppError("CONFLICT", "Chapter plan missing for QA.", { status: 409 });
   const chapter = await getAutoRunChapter(run.id, run.currentChapter);
@@ -422,14 +500,29 @@ async function stepArchive(run: AutoRun, signal: AbortSignal): Promise<void> {
   const chapter = await getAutoRunChapter(run.id, run.currentChapter);
   const pageNumber = chapter?.pageNumber ?? (await pageForLogicalChapter(run.slug, run.currentChapter));
   const text = stitch(chapter?.scenes ?? []) || (await getChapterContent(run.slug, pageNumber));
-  const archive = await runArchivist({
-    slug: run.slug,
-    outline: await getNovel(run.slug),
-    storyBible: run.storyBible!,
-    chapterPlan: plan,
-    chapterText: text,
-    signal,
-  });
+  const archivistDisabled = await isSkillDisabled(run.slug, "archivist");
+  const archive = archivistDisabled
+    ? {
+        summary: excerptSummary(text, plan.summary.trim() || `Chapter ${run.currentChapter}: ${plan.title}`),
+        characterState: "",
+        plotState: "",
+      }
+    : await runArchivist({
+        slug: run.slug,
+        outline: await getNovel(run.slug),
+        storyBible: run.storyBible!,
+        chapterPlan: plan,
+        chapterText: text,
+        signal,
+      });
+  if (archivistDisabled) {
+    await appendAutoEvent(run.id, {
+      level: "warn",
+      phase: "archive",
+      chapter: run.currentChapter,
+      message: "State Archivist skipped (disabled for this run). Using the chapter excerpt as its summary.",
+    });
+  }
   await saveChapterSummary(run.slug, pageNumber, archive.summary, plan.title);
   await upsertAutoRunChapter(run.id, run.currentChapter, {
     pageNumber,
@@ -588,4 +681,36 @@ export function abortAutoRun(runId: string): void {
 
 export function isAutoRunActive(runId: string): boolean {
   return activeRuns.has(runId);
+}
+
+/**
+ * Manual "Skip step" for optional phases. Architecture needs a Story Bible, so
+ * skipping the Story Architect synthesises one before moving on.
+ */
+export async function skipAutoStep(runId: string): Promise<AutoRun> {
+  const run = await getAutoRun(runId);
+  const target = nextPhase(run.phase);
+
+  if (run.phase === "architect") {
+    const outline = await getNovel(run.slug);
+    const storyBible = fallbackStoryBible(run, outline.premise);
+    const chapters = run.targetChapters > 0 ? run.targetChapters : storyBible.targetChapters;
+    return updateAutoRun(runId, {
+      storyBible: { ...storyBible, targetChapters: chapters },
+      targetChapters: chapters,
+      phase: target,
+      status: "running",
+      lastError: null,
+      startedAt: run.startedAt ?? now(),
+      finishedAt: null,
+    });
+  }
+
+  return updateAutoRun(runId, {
+    phase: target,
+    status: "running",
+    lastError: null,
+    startedAt: run.startedAt ?? now(),
+    finishedAt: null,
+  });
 }

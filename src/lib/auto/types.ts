@@ -155,6 +155,8 @@ export type AutoSkillDefinition = {
   role: "planner" | "executor" | "summarizer";
   summary: string;
   placeholders: string[];
+  /** Optional skills can be switched off per novel. */
+  optional: boolean;
 };
 
 export const AUTO_SKILLS: AutoSkillDefinition[] = [
@@ -164,6 +166,7 @@ export const AUTO_SKILLS: AutoSkillDefinition[] = [
     role: "planner",
     summary: "Premise and discussion into the Story Bible.",
     placeholders: ["premise", "existingSummaries", "startChapter", "desiredChapters", "planBrief"],
+    optional: true,
   },
   {
     key: "characters",
@@ -171,6 +174,7 @@ export const AUTO_SKILLS: AutoSkillDefinition[] = [
     role: "planner",
     summary: "Story Bible into the character roster.",
     placeholders: ["storyBible", "existingCharacters", "planBrief"],
+    optional: true,
   },
   {
     key: "outline",
@@ -185,6 +189,7 @@ export const AUTO_SKILLS: AutoSkillDefinition[] = [
       "targetChapters",
       "planBrief",
     ],
+    optional: false,
   },
   {
     key: "prose",
@@ -203,12 +208,14 @@ export const AUTO_SKILLS: AutoSkillDefinition[] = [
       "priorScenes",
       "revisionNotes",
     ],
+    optional: false,
   },
   {
     key: "qa",
     label: "Continuity & QA Critic",
     role: "summarizer",
     summary: "Chapter review before it is archived.",
+    optional: true,
     placeholders: ["storyBible", "characters", "summaries", "stateNotes", "chapterPlan", "chapterText"],
   },
   {
@@ -217,6 +224,7 @@ export const AUTO_SKILLS: AutoSkillDefinition[] = [
     role: "summarizer",
     summary: "Chapter summary and continuity notes.",
     placeholders: ["chapterPlan", "chapterText", "summaries"],
+    optional: true,
   },
 ];
 
@@ -227,6 +235,46 @@ export const AUTO_SKILL_PROMPT_KEYS = AUTO_SKILLS.flatMap((skill) => [
 
 export const AUTO_PLAN_SYSTEM_KEY = "auto_plan_system";
 export const AUTO_PLAN_TASK_KEY = "auto_plan_task";
+
+export const AUTO_OPTIONAL_SKILLS = AUTO_SKILLS.filter((skill) => skill.optional);
+
+const OPTIONAL_SKILL_KEYS = new Set(AUTO_OPTIONAL_SKILLS.map((skill) => skill.key));
+
+/** Keeps only optional skills, de-duplicated, in a stable order. */
+export function normalizeDisabledSkills(value: unknown): AutoSkillKey[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<AutoSkillKey>();
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    if (!OPTIONAL_SKILL_KEYS.has(item as AutoSkillKey)) continue;
+    seen.add(item as AutoSkillKey);
+  }
+  return AUTO_OPTIONAL_SKILLS.map((skill) => skill.key).filter((key) => seen.has(key));
+}
+
+export const PHASE_SKILL: Record<AutoPhase, AutoSkillKey | null> = {
+  architect: "architect",
+  characters: "characters",
+  outline: "outline",
+  prose: "prose",
+  qa: "qa",
+  archive: "archivist",
+  done: null,
+};
+
+/** Next pipeline phase, used when a step is skipped. */
+export function nextPhase(phase: AutoPhase): AutoPhase {
+  switch (phase) {
+    case "architect":
+      return "characters";
+    case "characters":
+      return "outline";
+    case "qa":
+      return "archive";
+    default:
+      return phase;
+  }
+}
 
 export const AUTO_PROMPT_KEYS = [
   AUTO_PLAN_SYSTEM_KEY,

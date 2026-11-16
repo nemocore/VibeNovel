@@ -6,7 +6,9 @@ import { getPromptMap } from "@/lib/storage/prompts";
 import {
   AUTO_PROMPT_KEYS,
   normalizeAutoModelOverrides,
+  normalizeDisabledSkills,
   type AutoModelOverrides,
+  type AutoSkillKey,
 } from "@/lib/auto/types";
 
 export type AutoSkillPromptState = {
@@ -18,6 +20,8 @@ export type AutoSkillPromptState = {
   defaults: Record<string, string>;
   /** Per-novel model choices. Empty strings mean "inherit". */
   models: AutoModelOverrides;
+  /** Optional skills switched off for this novel. */
+  disabled: AutoSkillKey[];
 };
 
 function pick(source: Record<string, string>): Record<string, string> {
@@ -53,8 +57,11 @@ export async function getAutoSkillPrompts(slug: string): Promise<AutoSkillPrompt
     overrides,
     defaults,
     models: normalizeAutoModelOverrides(row.autoModelsJson),
+    disabled: normalizeDisabledSkills(row.autoDisabledSkillsJson),
   };
 }
+
+export { normalizeDisabledSkills };
 
 export async function saveAutoSkillPrompts(
   slug: string,
@@ -62,6 +69,7 @@ export async function saveAutoSkillPrompts(
     values?: Record<string, string>;
     reset?: string[];
     models?: Partial<AutoModelOverrides>;
+    disabled?: string[];
   },
 ): Promise<AutoSkillPromptState> {
   const row = await bookRow(slug);
@@ -94,6 +102,10 @@ export async function saveAutoSkillPrompts(
     .set({
       autoSkillPromptsJson: Object.keys(stored).length ? stored : null,
       autoModelsJson: models,
+      autoDisabledSkillsJson:
+        patch.disabled !== undefined
+          ? normalizeDisabledSkills(patch.disabled)
+          : normalizeDisabledSkills(row.autoDisabledSkillsJson),
       updatedAt: new Date().toISOString(),
     })
     .where(eq(books.id, row.id))

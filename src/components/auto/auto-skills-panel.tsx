@@ -83,6 +83,10 @@ export function AutoSkillsPanel({
   const showCustom = mounted && (promptOverridden || modelOverridden);
 
   const effective = active.key;
+  const optionalSkill = AUTO_SKILLS.find(
+    (skill) => skill.key === active.key && skill.optional,
+  );
+  const skillEnabled = !state.disabled.includes(active.key);
   const inheritedModel = models.default
     ? modelLabel(options, models.default)
     : roleModels
@@ -102,6 +106,14 @@ export function AutoSkillsPanel({
       return next;
     });
     if (ok) toast.success(`${active.label} now follows the global template.`);
+  }
+
+  function toggleSkill() {
+    state.setDisabled((current) =>
+      current.includes(active.key)
+        ? current.filter((key) => key !== active.key)
+        : [...current, active.key],
+    );
   }
 
   return (
@@ -129,8 +141,19 @@ export function AutoSkillsPanel({
                     current ? "text-[#f2c477]" : "text-foreground/85 hover:text-foreground",
                   )}
                 >
-                  <span className="truncate">{item.label}</span>
-                  {showOwn ? (
+                  <span
+                    className={cn(
+                      "truncate",
+                      state.disabled.includes(item.key as AutoModelRole) && "text-muted-foreground/60",
+                    )}
+                  >
+                    {item.label}
+                  </span>
+                  {state.disabled.includes(item.key as AutoModelRole) ? (
+                    <span className="font-mono text-[8.5px] uppercase tracking-[0.12em] text-muted-foreground">
+                      off
+                    </span>
+                  ) : showOwn ? (
                     <span className="font-mono text-[8.5px] uppercase tracking-[0.12em] text-[#f2c477]">
                       own
                     </span>
@@ -184,6 +207,33 @@ export function AutoSkillsPanel({
               <Badge variant={showCustom ? "amber" : "default"}>
                 {showCustom ? "Custom" : "Global"}
               </Badge>
+              {active.key === "plan" ? null : optionalSkill ? (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={skillEnabled}
+                  aria-label={`${active.label} enabled for this novel`}
+                  onClick={() => toggleSkill()}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] transition-colors",
+                    skillEnabled
+                      ? "border-[#2d4a36] bg-[#14211a] text-[#9cc9a6]"
+                      : "border-border bg-secondary text-muted-foreground",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      skillEnabled ? "bg-[#86bd93]" : "bg-muted-foreground/50",
+                    )}
+                  />
+                  {skillEnabled ? "Enabled" : "Disabled"}
+                </button>
+              ) : (
+                <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground/70">
+                  Always on
+                </span>
+              )}
             </div>
             <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
               {active.summary}

@@ -7,6 +7,7 @@ export type AutoSkillsSnapshotPayload = {
   overrides: Record<string, string>;
   defaults: Record<string, string>;
   models: { default: string; skills: Record<string, string> };
+  disabled: import("@/lib/auto/types").AutoSkillKey[];
   roleModels: { planner: string; executor: string; summarizer: string };
   effectiveModels: Record<AutoModelRole, string>;
 };
@@ -46,6 +47,7 @@ export async function getAutoSkillsSnapshot(
     overrides: prompts.overrides,
     defaults: prompts.defaults,
     models: prompts.models,
+    disabled: prompts.disabled,
     roleModels,
     effectiveModels,
   };

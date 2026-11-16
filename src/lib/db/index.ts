@@ -42,6 +42,7 @@ const BOOK_COLUMNS: Array<[string, string]> = [
   ["cover_image_updated_at", "TEXT"],
   ["auto_skill_prompts_json", "TEXT"],
   ["auto_models_json", "TEXT"],
+  ["auto_disabled_skills_json", "TEXT"],
 ];
 
 function migrateColumns(

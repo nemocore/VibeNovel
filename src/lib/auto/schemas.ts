@@ -204,6 +204,7 @@ export const autoPlanLockSchema = z.object({
 export const autoSkillsSchema = z.object({
   values: z.record(z.string(), z.string().max(80_000)).optional(),
   reset: z.array(z.string().max(80)).max(30).optional(),
+  disabled: z.array(z.string().max(80)).max(20).optional(),
   models: z
     .object({
       default: z.string().max(500).optional(),
@@ -213,7 +214,7 @@ export const autoSkillsSchema = z.object({
 });
 
 export const autoActionSchema = z.object({
-  action: z.enum(["pause", "resume", "stop"]),
+  action: z.enum(["pause", "resume", "stop", "skip_step"]),
 });
 
 export const autoPatchSchema = z

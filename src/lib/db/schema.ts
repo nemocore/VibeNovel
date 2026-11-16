@@ -117,6 +117,7 @@ export const books = sqliteTable(
       Record<string, string>
     >(),
     autoModelsJson: text("auto_models_json", { mode: "json" }).$type<AutoModelOverrides>(),
+    autoDisabledSkillsJson: text("auto_disabled_skills_json", { mode: "json" }).$type<string[]>(),
   },
   (table) => [index("books_slug_idx").on(table.slug), index("books_draft_idx").on(table.isDraft)],
 );

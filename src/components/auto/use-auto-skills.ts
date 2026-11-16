@@ -7,6 +7,7 @@ export type AutoSkillsSnapshot = {
   overrides: Record<string, string>;
   defaults: Record<string, string>;
   models: { default: string; skills: Record<string, string> };
+  disabled?: string[];
   roleModels?: { planner: string; executor: string; summarizer: string };
   effectiveModels?: Record<string, string>;
   error?: { message?: string };
@@ -45,6 +46,8 @@ export function useAutoSkillsState(runId: string, initial: AutoSkillsSnapshot) {
     skills: { ...(initial.models?.skills ?? {}) },
   });
   const [overrides, setOverrides] = useState(initial.overrides);
+  const [disabled, setDisabled] = useState<string[]>(initial.disabled ?? []);
+  const [savedDisabled, setSavedDisabled] = useState<string[]>(initial.disabled ?? []);
   const [defaults] = useState(initial.defaults);
   const [roleModels, setRoleModels] = useState(initial.roleModels);
   const [effectiveModels, setEffectiveModels] = useState(initial.effectiveModels);
@@ -52,8 +55,11 @@ export function useAutoSkillsState(runId: string, initial: AutoSkillsSnapshot) {
   const [error, setError] = useState<string | null>(null);
 
   const dirty = useMemo(
-    () => !sameValues(draft, saved) || !sameModels(models, savedModels),
-    [draft, saved, models, savedModels],
+    () =>
+      !sameValues(draft, saved) ||
+      !sameModels(models, savedModels) ||
+      [...disabled].sort().join("|") !== [...savedDisabled].sort().join("|"),
+    [draft, saved, models, savedModels, disabled, savedDisabled],
   );
 
   const apply = useCallback((next: AutoSkillsSnapshot) => {
@@ -68,6 +74,8 @@ export function useAutoSkillsState(runId: string, initial: AutoSkillsSnapshot) {
       skills: { ...(next.models?.skills ?? {}) },
     });
     setOverrides(next.overrides);
+    setDisabled(next.disabled ?? []);
+    setSavedDisabled(next.disabled ?? []);
     setRoleModels(next.roleModels);
     setEffectiveModels(next.effectiveModels);
   }, []);
@@ -77,6 +85,7 @@ export function useAutoSkillsState(runId: string, initial: AutoSkillsSnapshot) {
       values?: Record<string, string>;
       reset?: string[];
       models?: AutoSkillsSnapshot["models"];
+      disabled?: string[];
     }): Promise<boolean> => {
       setError(null);
       try {
@@ -104,10 +113,20 @@ export function useAutoSkillsState(runId: string, initial: AutoSkillsSnapshot) {
 
   const save = useCallback(async () => {
     setBusy("save");
-    const ok = await persist({ values: draft, models });
+    const ok = await persist({ values: draft, models, disabled });
     setBusy(null);
     return ok;
-  }, [draft, models, persist]);
+  }, [draft, models, disabled, persist]);
+
+  const saveDisabled = useCallback(
+    async (next: string[]) => {
+      setBusy("save");
+      const ok = await persist({ disabled: next });
+      setBusy(null);
+      return ok;
+    },
+    [persist],
+  );
 
   const resetPrompts = useCallback(
     async (keys: string[]) => {
@@ -122,6 +141,8 @@ export function useAutoSkillsState(runId: string, initial: AutoSkillsSnapshot) {
   return {
     draft,
     setDraft,
+    disabled,
+    setDisabled,
     models,
     setModels,
     defaults,
@@ -133,6 +154,7 @@ export function useAutoSkillsState(runId: string, initial: AutoSkillsSnapshot) {
     error,
     setError,
     save,
+    saveDisabled,
     resetPrompts,
   };
 }
