@@ -40,6 +40,8 @@ const BOOK_COLUMNS: Array<[string, string]> = [
   ["cover_image_provider_id", "TEXT"],
   ["cover_image_model", "TEXT"],
   ["cover_image_updated_at", "TEXT"],
+  ["auto_skill_prompts_json", "TEXT"],
+  ["auto_models_json", "TEXT"],
 ];
 
 function migrateColumns(
@@ -157,6 +159,55 @@ CREATE TABLE IF NOT EXISTS books (
 );
 CREATE INDEX IF NOT EXISTS books_slug_idx ON books (slug);
 CREATE INDEX IF NOT EXISTS books_draft_idx ON books (is_draft);
+
+CREATE TABLE IF NOT EXISTS auto_runs (
+  id TEXT PRIMARY KEY,
+  book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'queued',
+  mode TEXT NOT NULL DEFAULT 'checkpoint',
+  phase TEXT NOT NULL DEFAULT 'architect',
+  target_chapters INTEGER NOT NULL DEFAULT 0,
+  current_chapter INTEGER NOT NULL DEFAULT 1,
+  current_scene INTEGER NOT NULL DEFAULT 0,
+  revision_count INTEGER NOT NULL DEFAULT 0,
+  story_bible_json TEXT,
+  outline_json TEXT NOT NULL DEFAULT '[]',
+  state_json TEXT NOT NULL,
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS auto_runs_book_idx ON auto_runs (book_id);
+CREATE INDEX IF NOT EXISTS auto_runs_status_idx ON auto_runs (status);
+
+CREATE TABLE IF NOT EXISTS auto_run_chapters (
+  run_id TEXT NOT NULL REFERENCES auto_runs(id) ON DELETE CASCADE,
+  chapter_number INTEGER NOT NULL,
+  page_number INTEGER,
+  status TEXT NOT NULL DEFAULT 'planned',
+  scene_index INTEGER NOT NULL DEFAULT 0,
+  revision_count INTEGER NOT NULL DEFAULT 0,
+  scenes_json TEXT NOT NULL DEFAULT '[]',
+  qa_json TEXT,
+  summary TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (run_id, chapter_number)
+);
+CREATE INDEX IF NOT EXISTS auto_run_chapters_run_idx ON auto_run_chapters (run_id);
+
+CREATE TABLE IF NOT EXISTS auto_run_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL REFERENCES auto_runs(id) ON DELETE CASCADE,
+  level TEXT NOT NULL DEFAULT 'info',
+  phase TEXT NOT NULL,
+  chapter INTEGER,
+  message TEXT NOT NULL,
+  data_json TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS auto_run_events_run_idx ON auto_run_events (run_id, id);
 
 CREATE TABLE IF NOT EXISTS chapters (
   book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,

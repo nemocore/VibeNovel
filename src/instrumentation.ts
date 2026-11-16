@@ -8,4 +8,7 @@ export async function register() {
 
   await ensureDataDirs();
   await getDb();
+
+  const { recoverInterruptedAutoRuns } = await import("@/lib/storage/auto-runs");
+  await recoverInterruptedAutoRuns();
 }

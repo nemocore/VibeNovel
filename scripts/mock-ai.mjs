@@ -37,8 +37,10 @@ Mara touched the map. The coastline was warm.
 
 Outside, the bird began its three notes again, and this time the garden answered.`;
 
+const PREMISE = "A cartographer returns to her childhood home after eleven years and finds a map of a coastline that should not exist. The house is unchanged in ways that feel accusatory and altered in ways no one will explain. A woman she barely remembers has been tending the garden and the absence, and she knows more about the map than she admits. As the coastline begins to appear where no coast has ever been, the protagonist must decide whether to preserve the family's carefully arranged version of the past or follow the map into a geography that may cost her the last living members of her family. The novel is a quiet, atmospheric story about inheritance, cartography, and the stories families use to make themselves legible.";
+
 function premiseText() {
-  return `A cartographer returns to her childhood home after eleven years and finds a map of a coastline that should not exist. The house is unchanged in ways that feel accusatory and altered in ways no one will explain. A woman she barely remembers has been tending the garden and the absence, and she knows more about the map than she admits. As the coastline begins to appear where no coast has ever been, the protagonist must decide whether to preserve the family's carefully arranged version of the past or follow the map into a geography that may cost her the last living members of her family. The novel is a quiet, atmospheric story about inheritance, cartography, and the stories families use to make themselves legible.`;
+  return PREMISE;
 }
 
 function titleText() {
@@ -82,12 +84,144 @@ function charactersJson() {
   ]);
 }
 
+function autoStoryBible() {
+  return JSON.stringify({
+    title: "The Cartographer's Debt",
+    logline: "A cartographer returns home and finds a coastline that should not exist.",
+    tone: "Quiet, atmospheric, literary.",
+    worldRules: ["The map changes when it is touched.", "The house remembers the family."],
+    coreConflict: "Mara must choose between the family story and the truth of the map.",
+    endingResolution: "Mara accepts the coastline and the cost of knowing.",
+    targetChapters: 4,
+    constraints: ["Mara is a cartographer.", "Ren knows more than she admits."],
+  });
+}
+
+function autoCharacters() {
+  return JSON.stringify({
+    characters: [
+      {
+        name: "Mara",
+        role: "protagonist",
+        description: "Cartographer. Returns after eleven years. Notices surfaces.",
+      },
+      {
+        name: "Ren",
+        role: "ally",
+        description: "Tends the garden. Withholds the map's origin.",
+      },
+    ],
+  });
+}
+
+function autoOutline(messages) {
+  const all = messages.map((message) => message.content).join("\n");
+  const startMatch = all.match(/\[NEXT CHAPTER\]\s*(\d+)/i);
+  const targetMatch = all.match(/\[TARGET CHAPTER\]\s*(\d+)/i);
+  const start = startMatch ? Number(startMatch[1]) : 1;
+  const target = targetMatch ? Number(targetMatch[1]) : 4;
+  const chapters = [];
+  for (let number = start; number <= target; number += 1) {
+    chapters.push({
+      number,
+      title: `Mock Chapter ${number}`,
+      purpose: "Advance the map mystery.",
+      summary: "Mara follows the coastline and learns one new fact.",
+      characters: ["Mara", "Ren"],
+      scenes: [1, 2, 3].map((index) => ({
+        index,
+        title: `Scene ${index}`,
+        beat: "Mara acts, the map answers, a new question opens.",
+        pov: "Mara",
+      })),
+    });
+  }
+  return JSON.stringify({ chapters });
+}
+
+function autoProse() {
+  return "Mock scene prose. Mara crosses the room, touches the map, and listens to the house answer. The coastline is warm under her hand.";
+}
+
+function autoQa() {
+  return JSON.stringify({
+    pass: true,
+    severity: "none",
+    issues: [],
+    revisionInstructions: "",
+  });
+}
+
+function autoArchive() {
+  return JSON.stringify({
+    summary:
+      "Mara follows the impossible coastline and confirms that the map responds to her touch. Ren avoids the question of who sent the key. The house yields one new room.",
+    characterState: "Mara is more certain; Ren is more guarded.",
+    plotState: "The map's origin and the key's sender remain open.",
+  });
+}
+
+function autoPlanReply() {
+  return `Here is the plan as it stands.
+
+- Protagonist: Mara Voss, a cartographer who maps coastlines for a living.
+- Setting: the family house, the orchard, and a coastline that should not exist.
+- Central conflict: keeping the family story intact versus following the map.
+- Cast: Ren, who tends the garden and withholds the map's origin.
+
+Decisions to lock before we start:
+1. Twelve chapters, close third, present-day.
+2. The coastline widens by one street per chapter.
+3. The ending costs Mara the house, not her life.
+
+Approve the plan when these match what you want.`;
+}
+
+function autoAnalysis() {
+  return JSON.stringify({
+    logline: PREMISE.split(".")[0],
+    tone: "Quiet, atmospheric, literary.",
+    worldRules: ["The map responds to touch.", "The house remembers the family."],
+    coreConflict: "Mara must choose between the family story and the map.",
+    endingResolution: "Mara accepts the coastline and what it costs.",
+    targetChapters: 4,
+    characters: [
+      {
+        name: "Mara Voss",
+        role: "protagonist",
+        description: "Cartographer. Returns after eleven years. Notices surfaces.",
+      },
+      {
+        name: "Ren",
+        role: "ally",
+        description: "Tends the garden. Withholds the map's origin.",
+      },
+    ],
+    themes: ["inheritance", "cartography"],
+    pacing: "Slow-burn, one discovery per chapter.",
+  });
+}
+
+function autoAnalyse(input) {
+  const all = JSON.stringify(input).toLowerCase();
+  const wantsJson = all.includes('"format":"json"') || all.includes("analysis") ;
+  if (!wantsJson) return autoPlanReply();
+  return autoAnalysis();
+}
+
 function responseFor(messages) {
   const all = messages
     .map((message) => message.content)
     .join("\n")
     .toLowerCase();
 
+  if (all.includes("auto mode planning partner")) return autoAnalyse(messages);
+  if (all.includes("story architect")) return autoStoryBible();
+  if (all.includes("character weaver")) return autoCharacters();
+  if (all.includes("arc and scene outliner")) return autoOutline(messages);
+  if (all.includes("scene prose writer")) return autoProse();
+  if (all.includes("continuity and qa critic")) return autoQa();
+  if (all.includes("state archivist")) return autoArchive();
   if (all.includes("return only a json array")) return charactersJson();
   if (all.includes("expert prompt engineer")) return imagePromptText();
   if (all.includes("create a catchy and relevant title")) return "The Cartographer's Debt";

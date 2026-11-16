@@ -12,6 +12,7 @@ import {
 import { AppError } from "@/lib/errors";
 import { chapterSchema, characterSchema, chatMessageSchema, modelRolesSchema, presetRolesSchema } from "@/lib/schemas";
 import { getBookConfig } from "@/lib/storage/book-config";
+import { AUTO_PLAN_CHAT_SCOPE } from "@/lib/auto/chat";
 import {
   getChapterContent,
   getNovel,
@@ -86,6 +87,7 @@ export type BookBackup = z.infer<typeof bookBackupSchema>;
 
 function scopeFromKey(scope: string): "premise" | number | null {
   if (scope === "premise") return "premise";
+  if (scope === AUTO_PLAN_CHAT_SCOPE) return null;
   const match = /^chapter_(\d+)$/.exec(scope);
   if (!match) return null;
   const number = Number(match[1]);

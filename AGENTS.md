@@ -74,6 +74,15 @@ Next.js 16 App Router + React 19 + TypeScript (strict) + Tailwind v4 + Radix/sha
 - `src/app/api/drafts/[id]/finalize/route.ts` — publish draft with title.
 - Prompt/preset management: `src/app/api/prompts/route.ts`, `src/app/api/surgical-presets/**`.
 
+**Auto Mode (separate from Studio Mode)**
+- Lifecycle: create/fork → plan discussion → lock plan → deterministic background pipeline. Nothing runs before the plan is locked.
+- Routes: `src/app/api/auto/runs/route.ts` (create, list), `runs/[id]` (detail, checkpoint patch), `runs/[id]/actions` (pause/resume/stop), `runs/[id]/events`, `runs/[id]/plan` (planning chat), `runs/[id]/plan/lock`, `runs/[id]/skills` (per-novel prompt overrides), `books/route.ts`, `books/[slug]/pages` (live read).
+- Engine: `src/lib/auto/runner.ts` (6-skill state machine, in-process `globalThis` registry), `skills.ts` (payload builders), `plan.ts` (planning turn), `context.ts` (sliding context), `create.ts` (new book / fork), `chat.ts` (plan chat scope `auto_plan`).
+- Prompts: 14 `auto_*` keys in `prompt-definitions.ts`. `Settings > Prompt Templates` holds global defaults; per-novel overrides live on `books.auto_skill_prompts_json` and win at call time (`src/lib/storage/auto-skills.ts`).
+- Persistence: `auto_runs`, `auto_run_chapters`, `auto_run_events`; run state JSON carries `planBrief`, `planLockedAt`, `approved`, continuity notes.
+- UI: `/auto` (dashboard), `/auto/new` (create/fork), `/auto/[id]/plan` (discussion + lock + skill overrides), `/auto/[id]` (monitor, skill progress, checkpoint editor), `/auto/[id]/monitor` (read-only live reader).
+- Rules: never reuse Studio stream/store plumbing for Auto Mode; keep every payload ending in a `user` message; fork existing books rather than writing into a Studio manuscript.
+
 **Payload compilers & prompt layer**
 - `src/lib/ai/client.ts` — `buildChatRequestPayload()`, `deepMerge()`, `parseAdvancedParams()`, `generationFields()`, `chatCompletion()`, `openChatStream()`, `payloadOverride`.
 - `src/lib/ai/prompts.ts` — `vaultContext()`, `renderPrompt()`, `roleInjections()`, `applyInjections()`, and all message builders.
@@ -84,7 +93,7 @@ Next.js 16 App Router + React 19 + TypeScript (strict) + Tailwind v4 + Radix/sha
 - `src/lib/db/schema.ts` — Drizzle tables (`global_settings`, `providers`, `presets`, `prompt_templates`, `surgical_presets`, `books`, `chapters`, `characters`, `chats`).
 - `src/lib/db/index.ts` — singleton connection, DDL, column migrations, seeding.
 - `src/lib/db/migrate.ts` — legacy JSON/file import migrations.
-- `src/lib/storage/` — query layer: `novels.ts`, `chats.ts`, `config.ts`, `book-config.ts`, `prompts.ts`, `surgical-presets.ts`, `backup.ts`, `fs.ts`, `paths.ts`, `illustrations.ts`.
+- `src/lib/storage/` — query layer: `novels.ts`, `chats.ts`, `config.ts`, `book-config.ts`, `prompts.ts`, `auto-runs.ts`, `auto-skills.ts`, `surgical-presets.ts`, `backup.ts`, `fs.ts`, `paths.ts`, `illustrations.ts`.
 - Chapter prose: `data/novels/<slug>/chapters/*.md`. Metadata, chats, settings, images paths: SQLite.
 
 **UI components**

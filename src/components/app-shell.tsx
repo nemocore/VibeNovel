@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { BookOpen, Keyboard, LogOut, Settings2, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { BookOpen, Keyboard, LogOut, Settings2, ShieldCheck, SlidersHorizontal, Workflow } from "lucide-react";
 import { toast } from "sonner";
 import { Wordmark } from "@/components/wordmark";
 import { StatusDot } from "@/components/status-dot";
@@ -48,6 +48,13 @@ export function AppShell({
   const nav = [
     { href: "/", label: "Library", icon: BookOpen, match: (path: string) => path === "/" },
     {
+      href: "/auto",
+      label: "Auto Mode",
+      shortLabel: "Auto",
+      icon: Workflow,
+      match: (path: string) => path.startsWith("/auto"),
+    },
+    {
       href: "/presets",
       label: "Presets",
       icon: SlidersHorizontal,
@@ -83,7 +90,14 @@ export function AppShell({
                       : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground",
                   )}
                 >
-                  {item.label}
+                  {"shortLabel" in item && item.shortLabel ? (
+                    <>
+                      <span className="hidden sm:inline">{item.label}</span>
+                      <span className="sm:hidden">{item.shortLabel}</span>
+                    </>
+                  ) : (
+                    item.label
+                  )}
                   {active ? (
                     <span className="absolute inset-x-1.5 -bottom-[11px] h-px bg-primary sm:inset-x-2.5" />
                   ) : null}

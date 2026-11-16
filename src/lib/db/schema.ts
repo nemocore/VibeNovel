@@ -6,6 +6,17 @@ import type {
   Outline,
   PresetRoles,
 } from "@/lib/schemas";
+import type {
+  AutoChapterPlan,
+  AutoModelOverrides,
+  AutoPhase,
+  AutoQaResult,
+  AutoRunChapterStatus,
+  AutoRunMode,
+  AutoRunState,
+  AutoRunStatus,
+  AutoStoryBible,
+} from "@/lib/auto/types";
 
 export const globalSettings = sqliteTable("global_settings", {
   id: integer("id").primaryKey(),
@@ -102,8 +113,86 @@ export const books = sqliteTable(
     coverImageProviderId: text("cover_image_provider_id"),
     coverImageModel: text("cover_image_model"),
     coverImageUpdatedAt: text("cover_image_updated_at"),
+    autoSkillPromptsJson: text("auto_skill_prompts_json", { mode: "json" }).$type<
+      Record<string, string>
+    >(),
+    autoModelsJson: text("auto_models_json", { mode: "json" }).$type<AutoModelOverrides>(),
   },
   (table) => [index("books_slug_idx").on(table.slug), index("books_draft_idx").on(table.isDraft)],
+);
+
+export const autoRuns = sqliteTable(
+  "auto_runs",
+  {
+    id: text("id").primaryKey(),
+    bookId: text("book_id")
+      .notNull()
+      .references(() => books.id, { onDelete: "cascade" }),
+    status: text("status").$type<AutoRunStatus>().notNull().default("queued"),
+    mode: text("mode").$type<AutoRunMode>().notNull().default("checkpoint"),
+    phase: text("phase").$type<AutoPhase>().notNull().default("architect"),
+    targetChapters: integer("target_chapters").notNull().default(0),
+    currentChapter: integer("current_chapter").notNull().default(1),
+    currentScene: integer("current_scene").notNull().default(0),
+    revisionCount: integer("revision_count").notNull().default(0),
+    storyBibleJson: text("story_bible_json", { mode: "json" }).$type<AutoStoryBible | null>(),
+    outlineJson: text("outline_json", { mode: "json" })
+      .$type<AutoChapterPlan[]>()
+      .notNull()
+      .default([]),
+    stateJson: text("state_json", { mode: "json" }).$type<AutoRunState>().notNull(),
+    lastError: text("last_error"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    startedAt: text("started_at"),
+    finishedAt: text("finished_at"),
+  },
+  (table) => [
+    index("auto_runs_book_idx").on(table.bookId),
+    index("auto_runs_status_idx").on(table.status),
+  ],
+);
+
+export const autoRunChapters = sqliteTable(
+  "auto_run_chapters",
+  {
+    runId: text("run_id")
+      .notNull()
+      .references(() => autoRuns.id, { onDelete: "cascade" }),
+    chapterNumber: integer("chapter_number").notNull(),
+    pageNumber: integer("page_number"),
+    status: text("status").$type<AutoRunChapterStatus>().notNull().default("planned"),
+    sceneIndex: integer("scene_index").notNull().default(0),
+    revisionCount: integer("revision_count").notNull().default(0),
+    scenesJson: text("scenes_json", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    qaJson: text("qa_json", { mode: "json" }).$type<AutoQaResult | null>(),
+    summary: text("summary").notNull().default(""),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.chapterNumber] }),
+    index("auto_run_chapters_run_idx").on(table.runId),
+  ],
+);
+
+export const autoRunEvents = sqliteTable(
+  "auto_run_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: text("run_id")
+      .notNull()
+      .references(() => autoRuns.id, { onDelete: "cascade" }),
+    level: text("level").$type<"info" | "warn" | "error">().notNull().default("info"),
+    phase: text("phase").$type<AutoPhase>().notNull(),
+    chapter: integer("chapter"),
+    message: text("message").notNull(),
+    dataJson: text("data_json", { mode: "json" }).$type<unknown>(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [index("auto_run_events_run_idx").on(table.runId, table.id)],
 );
 
 export const chapters = sqliteTable(
@@ -177,6 +266,9 @@ export type DbBook = typeof books.$inferSelect;
 export type DbPreset = typeof presets.$inferSelect;
 export type DbPromptTemplate = typeof promptTemplates.$inferSelect;
 export type DbSurgicalPreset = typeof surgicalPresets.$inferSelect;
+export type DbAutoRun = typeof autoRuns.$inferSelect;
+export type DbAutoRunChapter = typeof autoRunChapters.$inferSelect;
+export type DbAutoRunEvent = typeof autoRunEvents.$inferSelect;
 export type DbChapter = typeof chapters.$inferSelect;
 export type DbCharacter = typeof characters.$inferSelect;
 export type DbChat = typeof chats.$inferSelect;

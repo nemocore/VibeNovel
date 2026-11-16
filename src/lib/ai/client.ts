@@ -1,5 +1,6 @@
 import { AppError } from "@/lib/errors";
 import { resolveEndpoints } from "@/lib/ai/urls";
+import { parseOpenAIStream } from "@/lib/ai/sse";
 import type { ConnectionResult, GenerationParams } from "@/lib/schemas";
 
 export type ChatRole = "system" | "user" | "assistant";
@@ -93,6 +94,8 @@ export function buildChatRequestPayload({
 export type ChatResult = {
   content: string;
   model: string;
+  /** Provider stop reason when supplied, e.g. "length" for a truncated reply. */
+  finishReason?: string | null;
   usage?: {
     promptTokens?: number;
     completionTokens?: number;
@@ -560,7 +563,7 @@ export async function chatCompletion(
       const content = extractContent(body);
       if (!content.trim()) {
         if (finishReason === "length" && attempt < retries && requestMaxTokens) {
-          const nextMaxTokens = Math.min(requestMaxTokens * 2, 8_192);
+          const nextMaxTokens = Math.min(requestMaxTokens * 2, 32_768);
           console.warn(
             `[ai] ${model} returned no visible text with max_tokens=${requestMaxTokens}; retrying with ${nextMaxTokens}.`,
           );
@@ -585,6 +588,7 @@ export async function chatCompletion(
       return {
         content,
         model: body.model || model,
+        finishReason,
         usage: body.usage
           ? {
               promptTokens: body.usage.prompt_tokens,
@@ -751,4 +755,50 @@ export async function openChatStream(options: {
   }
 
   throw lastError ?? new AppError("AI_UNAVAILABLE", "The model request failed.", { status: 502 });
+}
+
+/**
+ * Streaming completion for background work. Chunks keep the connection alive
+ * during long generations, and the full text is accumulated server-side.
+ */
+export async function chatCompletionStreaming(options: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  messages: ChatInputMessage[];
+  params?: GenerationParams;
+  temperature?: number;
+  payloadOverride?: Record<string, unknown>;
+  signal?: AbortSignal;
+  retries?: number;
+  onDelta?: (text: string, full: string) => void;
+}): Promise<ChatResult> {
+  const { onDelta, params, temperature = 0.85, ...rest } = options;
+  const response = await openChatStream({ ...rest, params, temperature });
+  if (!response.body) {
+    throw new AppError("AI_BAD_RESPONSE", "The provider returned no stream.", {
+      status: 502,
+      retryable: true,
+    });
+  }
+
+  let content = "";
+  let reasoning = "";
+  let usage: ChatResult["usage"];
+  for await (const piece of parseOpenAIStream(response.body)) {
+    if (piece.type === "delta") {
+      content += piece.text;
+      onDelta?.(piece.text, content);
+    } else if (piece.type === "reasoning") {
+      reasoning += piece.text;
+    } else if (piece.type === "usage") {
+      usage = piece.usage;
+    }
+  }
+
+  return {
+    content: content.trim() ? content : reasoning,
+    model: options.model,
+    usage,
+  };
 }

@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-type PromptGroup = "System prompts" | "Task instructions";
+type PromptGroup = "System prompts" | "Task instructions" | "Auto Mode skills";
 
 type PromptDefinition = {
   key: string;
@@ -24,7 +24,7 @@ type PromptsResponse = {
   error?: { message?: string };
 };
 
-const GROUPS: PromptGroup[] = ["System prompts", "Task instructions"];
+const GROUPS: PromptGroup[] = ["System prompts", "Task instructions", "Auto Mode skills"];
 
 export function PromptTemplatesPanel() {
   const [definitions, setDefinitions] = useState<PromptDefinition[]>([]);
@@ -117,7 +117,7 @@ export function PromptTemplatesPanel() {
           <div>
             <h2 className="text-[13px] font-medium">Prompt Templates</h2>
             <p className="mt-0.5 max-w-2xl text-[11px] leading-relaxed text-muted-foreground">
-              Global instructions for every model call. Edit the text or the placeholders in
+              Global defaults for every model call, and the starter copy for new Auto Mode novels. A novel can override its own Auto Mode skills without changing anything here. Edit the text or the placeholders in
               <span className="font-mono"> {"{{braces}}"}</span>. Empty prompts fall back to the
               built-in default.
             </p>

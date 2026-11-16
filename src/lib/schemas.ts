@@ -108,7 +108,7 @@ export const chatMessageSchema = z.object({
 
 export const chatSchema = z.object({
   version: z.literal(1),
-  scope: z.union([z.literal("premise"), z.number().int().positive()]),
+  scope: z.union([z.literal("premise"), z.literal("auto_plan"), z.number().int().positive()]),
   messages: z.array(chatMessageSchema).max(2_000).default([]),
   updatedAt: z.string().min(1),
 });

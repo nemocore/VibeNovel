@@ -19,6 +19,7 @@ import {
   Sparkles,
   Trash2,
   Wand2,
+  Workflow,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -412,6 +413,12 @@ export function BookDetailView({
                 <Link href={`/novels/${slug}/read`}>
                   <BookOpen />
                   Reading mode
+                </Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link href="/auto/new">
+                  <Workflow />
+                  Auto Mode
                 </Link>
               </Button>
             </div>

@@ -3,10 +3,13 @@ import { getDb } from "@/lib/db";
 import { books, chats } from "@/lib/db/schema";
 import { NotFoundError } from "@/lib/errors";
 import type { Chat, ChatMessage } from "@/lib/schemas";
+import { AUTO_PLAN_CHAT_SCOPE } from "@/lib/auto/chat";
 
 const now = () => new Date().toISOString();
 
-export function emptyChat(scope: "premise" | number): Chat {
+export type ChatScope = "premise" | number | typeof AUTO_PLAN_CHAT_SCOPE;
+
+export function emptyChat(scope: ChatScope): Chat {
   return {
     version: 1,
     scope,
@@ -15,8 +18,10 @@ export function emptyChat(scope: "premise" | number): Chat {
   };
 }
 
-function scopeKey(scope: "premise" | number): string {
-  return scope === "premise" ? "premise" : `chapter_${scope}`;
+function scopeKey(scope: ChatScope): string {
+  if (scope === "premise") return "premise";
+  if (scope === AUTO_PLAN_CHAT_SCOPE) return AUTO_PLAN_CHAT_SCOPE;
+  return `chapter_${scope}`;
 }
 
 async function getBookIdBySlug(slug: string): Promise<string> {
@@ -43,7 +48,7 @@ async function getDraftId(id: string): Promise<string> {
 
 async function readChatByBookId(
   bookId: string,
-  scope: "premise" | number,
+  scope: ChatScope,
 ): Promise<Chat> {
   const db = await getDb();
   const row = db
@@ -81,7 +86,7 @@ async function writeChat(bookId: string, chat: Chat): Promise<Chat> {
 
 async function appendByBookId(
   bookId: string,
-  scope: "premise" | number,
+  scope: ChatScope,
   message: ChatMessage,
 ): Promise<Chat> {
   const chat = await readChatByBookId(bookId, scope);
@@ -90,7 +95,7 @@ async function appendByBookId(
 
 async function updateByBookId(
   bookId: string,
-  scope: "premise" | number,
+  scope: ChatScope,
   messageId: string,
   patch: Partial<ChatMessage>,
 ): Promise<Chat> {
@@ -113,14 +118,14 @@ export async function saveDraftChat(id: string, chat: Chat): Promise<Chat> {
 
 export async function readNovelChat(
   slug: string,
-  scope: "premise" | number,
+  scope: ChatScope,
 ): Promise<Chat> {
   return readChatByBookId(await getBookIdBySlug(slug), scope);
 }
 
 export async function appendNovelChatMessage(
   slug: string,
-  scope: "premise" | number,
+  scope: ChatScope,
   message: ChatMessage,
 ): Promise<Chat> {
   return appendByBookId(await getBookIdBySlug(slug), scope, message);
@@ -128,7 +133,7 @@ export async function appendNovelChatMessage(
 
 export async function updateNovelChatMessage(
   slug: string,
-  scope: "premise" | number,
+  scope: ChatScope,
   messageId: string,
   patch: Partial<ChatMessage>,
 ): Promise<Chat> {
@@ -137,14 +142,14 @@ export async function updateNovelChatMessage(
 
 export async function readDraftChat(
   id: string,
-  scope: "premise" | number,
+  scope: ChatScope,
 ): Promise<Chat> {
   return readChatByBookId(await getDraftId(id), scope);
 }
 
 export async function appendDraftChatMessage(
   id: string,
-  scope: "premise" | number,
+  scope: ChatScope,
   message: ChatMessage,
 ): Promise<Chat> {
   return appendByBookId(await getDraftId(id), scope, message);
@@ -152,7 +157,7 @@ export async function appendDraftChatMessage(
 
 export async function updateDraftChatMessage(
   id: string,
-  scope: "premise" | number,
+  scope: ChatScope,
   messageId: string,
   patch: Partial<ChatMessage>,
 ): Promise<Chat> {
@@ -161,7 +166,7 @@ export async function updateDraftChatMessage(
 
 export async function ensureChat(
   bookId: string,
-  scope: "premise" | number,
+  scope: ChatScope,
 ): Promise<void> {
   const db = await getDb();
   db.insert(chats)

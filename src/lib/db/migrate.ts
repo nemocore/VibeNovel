@@ -29,7 +29,7 @@ type AppDb = BetterSQLite3Database<typeof schema>;
 
 const MIGRATION_KEY = "legacy_files_migrated";
 
-function scopeKey(scope: "premise" | number): string {
+function scopeKey(scope: "premise" | "auto_plan" | number): string {
   return scope === "premise" ? "premise" : `chapter_${scope}`;
 }
 
